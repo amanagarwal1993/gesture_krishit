@@ -1,6 +1,6 @@
 from __future__ import print_function
-from azure.cognitiveservices.vision.customvision.training import training_api
-from azure.cognitiveservices.vision.customvision.training.models import ImageUrlCreateEntry
+#from azure.cognitiveservices.vision.customvision.training import training_api
+#from azure.cognitiveservices.vision.customvision.training.models import ImageUrlCreateEntry
 
 
 import cv2
@@ -26,11 +26,11 @@ _maxNumRetries = 10
 
 def classify():
         data= None
+        
+        # Change path
         pathToFileInDisk = r'C:\Users\Krishit Arora\Desktop\1.jpg'
-        with open( pathToFileInDisk, 'rb' ) as f:
-            data = f.read()
-            data
         imgt=cv2.imread(pathToFileInDisk,0)
+        
         #cv2.imshow('image', imgt)
         
         # Computer Vision parameters
@@ -52,8 +52,6 @@ def classify():
         cv2.imshow(str(analysis["Predictions"][0]["Tag"]),imgt)
         print (analysis)
         
-
-
 
 # parameters
 cap_region_x_begin=0.5  # start point/total width
@@ -114,79 +112,72 @@ cv2.createTrackbar('trh1', 'trackbar', threshold, 100, printThreshold)
 
 
 while i<1:
- while camera.isOpened():
-    ret, frame = camera.read()
-    threshold = cv2.getTrackbarPos('trh1', 'trackbar')
-    frame = cv2.bilateralFilter(frame, 5, 50, 100)  # smoothing filter
-    frame = cv2.flip(frame, 1)  # flip the frame horizontally
-    cv2.rectangle(frame, (int(cap_region_x_begin * frame.shape[1]), 0),
-                 (frame.shape[1], int(cap_region_y_end * frame.shape[0])), (255, 0, 0), 2)
-    cv2.imshow('original', frame)
-
-    #  Main operation
-    if isBgCaptured == 1:  # this part wont run until background captured
-        img = removeBG(frame)
-        img = img[0:int(cap_region_y_end * frame.shape[0]),
-                    int(cap_region_x_begin * frame.shape[1]):frame.shape[1]]  # clip the ROI
-        cv2.imshow('mask', img)
-
-        # convert the image into binary image
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (blurValue, blurValue), 0)
-    #    cv2.imshow('blur', blur)
-        ret, thresh = cv2.threshold(blur, threshold, 255, cv2.THRESH_BINARY)
-    #   cv2.imshow('ori', thresh)
-
-
-        # get the coutours
-        thresh1 = copy.deepcopy(thresh)
-        image, contours, hierarchy = cv2.findContours(thresh1, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        length = len(contours)
-        maxArea = -1
-        if length > 0:
-            for i in range(length):  # find the biggest contour (according to area)
-                temp = contours[i]
-                area = cv2.contourArea(temp)
-                if area > maxArea:
-                    maxArea = area
-                    ci = i
-
-            res = contours[ci]
-            hull = cv2.convexHull(res)
-            drawing = np.zeros(img.shape, np.uint8)
-            cv2.drawContours(drawing, [res], 0, (0, 255, 0), 2)
-            cv2.drawContours(drawing, [hull], 0, (0, 0, 255), 3)
-
-            isFinishCal,cnt = calculateFingers(res,drawing)
-            if triggerSwitch is True:
-                if isFinishCal is True and cnt <= 2:
-                    print (cnt)
-                    # app('System Events').keystroke(' ')  # simulate pressing blank space
-
-        cv2.imshow('output', drawing)
-
-    # Keyboard OP
-    k = cv2.waitKey(10)
-    if k == 27:  # press ESC to exit
-        cv2.destroyAllWindows()
-        break
-    elif k == ord('b'):  # press 'b' to capture the background
-        bgModel = cv2.createBackgroundSubtractorMOG2(0, bgSubThreshold)
-        isBgCaptured = 1
-        print ('!!!Background Captured!!!')
-        i=i+1
-    elif k == ord('c'):
-        img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        cv2.imwrite('1.jpg', img_gray)
-        classify()        
+    while camera.isOpened():
+        ret, frame = camera.read()
         
-    elif k == ord('r'):  # press 'r' to reset the background
-        bgModel = None
-        triggerSwitch = False
-        isBgCaptured = 0
-        i=0
-        print ('!!!Reset BackGround!!!')
-    elif k == ord('n'):
-        triggerSwitch = True
-        print ('!!!Trigger On!!!')
+        threshold = cv2.getTrackbarPos('trh1', 'trackbar')
         
+        frame = cv2.bilateralFilter(frame, 5, 50, 100)  # smoothing filter
+        frame = cv2.flip(frame, 1)  # flip the frame horizontally
+        
+        # Draw the region of interest onto original frame for visual feedback
+        cv2.rectangle(frame, (int(cap_region_x_begin * frame.shape[1]), 0),
+                     (frame.shape[1], int(cap_region_y_end * frame.shape[0])), (255, 0, 0), 2)
+        if isBgCaptured == 0:
+            cv2.imshow('original', frame)
+
+        #  Main operation
+        # this part will run when you press 'b' on a frame
+        if isBgCaptured == 1:
+            # Process Image
+            #img = removeBG(frame)
+            
+            # extract the ROI
+            roi = frame[0:int(cap_region_y_end * frame.shape[0]),
+                        int(cap_region_x_begin * frame.shape[1]):frame.shape[1]]
+            
+            roi = removeBG(roi)
+            #cv2.imshow('mask', img)
+            # convert the image into binary image
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            #cv2.imshow('gray', gray)
+            #blur = cv2.GaussianBlur(gray, (blurValue, blurValue), 0)
+            #cv2.imshow('blur', blur)
+            #ret, thresh = cv2.threshold(blur, threshold, 255, cv2.THRESH_BINARY)
+            
+            thresh = np.dstack((gray, gray, gray))
+            
+            # Overlay
+            frame[0:int(cap_region_y_end * frame.shape[0]),int(cap_region_x_begin * frame.shape[1]):frame.shape[1]] = thresh
+            
+            cv2.imshow('original', frame)
+            
+            
+        # Keyboard OP
+        k = cv2.waitKey(10)
+        if k == 27:  # press ESC to exit
+            cv2.destroyAllWindows()
+            break
+        
+        if k == ord('b'):  # press 'b' to capture the background
+            bgModel = cv2.createBackgroundSubtractorMOG2(0, bgSubThreshold)
+            isBgCaptured = 1
+            print ('!!!Background Captured!!!')
+            i=i+1
+
+        #elif k == ord('c'):
+            #img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            #cv2.imwrite('1.jpg', img_gray)
+            #classify()        
+
+        elif k == ord('r'):  # press 'r' to reset the background
+            bgModel = None
+            triggerSwitch = False
+            isBgCaptured = 0
+            i=0
+            print ('!!!Reset BackGround!!!')
+            
+        elif k == ord('n'):
+            triggerSwitch = True
+            print ('!!!Trigger On!!!')
+
