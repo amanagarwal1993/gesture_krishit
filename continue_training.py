@@ -3,138 +3,190 @@ import cv2
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 import glob
+import random
 
-from keras import backend as K
-K.set_learning_phase(0)
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from keras.utils import to_categorical
 
-import tensorflow as tf
 
+print ("Setting up data...")
 # Set up the data
 gestures = ['a', 'b', 'c', 'd', 'g', 'h', 'i', 'l', 'v', 'y']
 
-y_all = []
-paths = []
+
+class HandPics():
+    """
+    Used to store the entire dataset or subset of images, with methods to augment etc accordingly
+    """
+    def __init__(self):
+        self.paths = []
+        self.labels = []
+        self.images = []
+        self.final_labels = []
+        
+    def add_labels(self,new_labels):
+        self.labels.extend(new_labels)
+    
+    def add_paths(self, new_paths):
+        self.paths.extend(new_paths)
+    
+    def extract_and_augment(self):
+        print ("Augmenting images...")
+        rows = 128
+        cols = 128
+
+        for i in range(len(self.paths)):
+            # Add the 14 labels
+            self.final_labels.extend(([self.labels[i]] * 14))
+            
+            rotation = random.randint(10,20)
+            shift = random.randint(10,20)
+
+            R1 = cv2.getRotationMatrix2D((cols/2,rows/2),rotation,1)
+            R2 = cv2.getRotationMatrix2D((cols/2,rows/2),rotation*-1,1)
+
+            R_zoom = cv2.getRotationMatrix2D((cols/2,rows/2),rotation,1.5)
+            R_out = cv2.getRotationMatrix2D((cols/2,rows/2),rotation,0.5)
+
+            pts1 = np.float32([[30,30],[30,108],[108,30],[108,108]])
+            pts2 = np.float32([[30-shift,30-shift],[30-shift,128],[98+shift,30+shift],[98+shift,98+shift]])
+            pts3 = np.float32([[30+shift,30+shift],[30+shift,98+shift],[128,0],[128,128]])
+
+            zoom_left = cv2.getPerspectiveTransform(pts1,pts2)
+            zoom_right = cv2.getPerspectiveTransform(pts1,pts3)
+
+            image = mpimg.imread(self.paths[i])
+
+            # Flip
+            self.images.append(image * 1./255 - 0.5)
+            flip = (cv2.flip(image, 1))
+            self.images.append(flip)
+
+            # Rotate and zoom
+            self.images.append(cv2.warpAffine(image,R1,(cols,rows)))
+            self.images.append(cv2.warpAffine(image,R2,(cols,rows)))
+
+            self.images.append(cv2.warpAffine(flip,R1,(cols,rows)))
+            self.images.append(cv2.warpAffine(flip,R2,(cols,rows)))
+
+            self.images.append(cv2.warpAffine(image,R_zoom,(cols,rows)))
+            self.images.append(cv2.warpAffine(image,R_out,(cols,rows)))
+
+            self.images.append(cv2.warpAffine(flip,R_zoom,(cols,rows)))
+            self.images.append(cv2.warpAffine(flip,R_out,(cols,rows)))
+
+            # Shear
+            self.images.append(cv2.warpPerspective(image, zoom_left,(cols,rows)))
+            self.images.append(cv2.warpPerspective(image, zoom_right,(cols,rows)))
+
+            self.images.append(cv2.warpPerspective(flip, zoom_left,(cols,rows)))
+            self.images.append(cv2.warpPerspective(flip, zoom_right,(cols,rows)))
+        
+        self.images = np.array(self.images)
+        self.final_labels = np.array(self.final_labels)
+    
+    def encode_labels(self):
+        print ("Encoding labels...")
+        # Encode string labels into integer format
+        enc = LabelEncoder()
+        self.final_labels = enc.fit_transform(self.final_labels)
+
+        # Convert to one-hot
+        self.final_labels = to_categorical(self.final_labels, num_classes=None)
+    
+    def data(self):
+        return self.images
+    
+    def y(self):
+        return self.final_labels
+
+        
+plain_bg_data = HandPics()
+real_bg_data = HandPics()
 
 # Add filepaths to array
 prefix = 'Triesch/*'
 suffix = '.pgm'
 
+# Plain background images
 for char in gestures:
+    label = None
     paths_char = []
-    for i in range(1,4):
+    for i in range(1,3):
+        if (char == 'h'):
+            label = 'g'
+        elif (char == 'l'):
+            label = 'd'
+        elif (char == 'i'):
+            continue
+        else:
+            label = char
         paths_char.extend(glob.glob(prefix + char + str(i) + suffix))
+    plain_bg_data.add_labels(([label] * len(paths_char)))
+    plain_bg_data.add_paths(paths_char)
+
+
+real_paths = []
+real_labels = []
+# Real background images
+for char in gestures:
+    label = None
+    paths_char = []
     if (char == 'h'):
-        char = 'g'
+        label = 'g'
     elif (char == 'l'):
-        char = 'd'
-    y_all.extend(([char] * len(paths_char)))
-    paths.extend(paths_char)
+        label = 'd'
+    elif (char == 'i'):
+        continue
+    else:
+        label = char
+    paths_char.extend(glob.glob(prefix + char + '3' + suffix))
+    real_labels.extend(([label] * len(paths_char)))
+    real_paths.extend(paths_char)
 
-paths = np.array(paths)
-
-from sklearn.preprocessing import OneHotEncoder, LabelEncoder
-from keras.utils import to_categorical
-
-# Encode string labels into integer format
-enc = LabelEncoder()
-y_all = enc.fit_transform(y_all)
-
-# Convert to one-hot
-y = to_categorical(y_all, num_classes=None)
-
+# Now split into train test sets
 from sklearn.model_selection import train_test_split
 
-X_train, X_val, y_train, y_val = train_test_split(paths, y, test_size=0.2, random_state=42)
-
-x_val = []
-for path in X_val:
-    x_val.append(mpimg.imread(path))
-x_val = np.array(x_val)
-
-# Initialize the train generator to generate augmented batches of data
-from sklearn.utils import shuffle
-rows = 128
-cols = 128
-
-def generator(paths, labels, zoom=True, warp=True, rotation=20):
-    R1 = cv2.getRotationMatrix2D((cols/2,rows/2),rotation,1)
-    R2 = cv2.getRotationMatrix2D((cols/2,rows/2),rotation*-1,1)
-    
-    R_zoom = cv2.getRotationMatrix2D((cols/2,rows/2),rotation,1.5)
-    R_out = cv2.getRotationMatrix2D((cols/2,rows/2),rotation,0.5)
-    
-    pts1 = np.float32([[30,30],[30,108],[108,30],[108,108]])
-    pts2 = np.float32([[0,0],[0,128],[100,50],[100,100]])
-    pts3 = np.float32([[50,50],[50,100],[128,0],[128,128]])
-                      
-    zoom_left = cv2.getPerspectiveTransform(pts1,pts2)
-    zoom_right = cv2.getPerspectiveTransform(pts1,pts3)
-    
-    # Batches of 14 images
-    for i in range(len(paths)):
-        # Initialize empty batch to be filled in
-        batch_images = []
-        batch_labels = np.array([labels[i]] * 14)
-
-        image = mpimg.imread(paths[i])
-    
-        # Flip
-        batch_images.append(image)
-        flip = (cv2.flip(image, 1))
-        batch_images.append(flip)
-        
-        # Rotate and zoom
-        batch_images.append(cv2.warpAffine(image,R1,(cols,rows)))
-        batch_images.append(cv2.warpAffine(image,R2,(cols,rows)))
-        
-        batch_images.append(cv2.warpAffine(flip,R1,(cols,rows)))
-        batch_images.append(cv2.warpAffine(flip,R2,(cols,rows)))
-        
-        batch_images.append(cv2.warpAffine(image,R_zoom,(cols,rows)))
-        batch_images.append(cv2.warpAffine(image,R_out,(cols,rows)))
-        
-        batch_images.append(cv2.warpAffine(flip,R_zoom,(cols,rows)))
-        batch_images.append(cv2.warpAffine(flip,R_out,(cols,rows)))
-        
-        # Shear
-        batch_images.append(cv2.warpPerspective(image, zoom_left,(cols,rows)))
-        batch_images.append(cv2.warpPerspective(image, zoom_right,(cols,rows)))
-        
-        batch_images.append(cv2.warpPerspective(flip, zoom_left,(cols,rows)))
-        batch_images.append(cv2.warpPerspective(flip, zoom_right,(cols,rows)))
-        
-        batch_images = np.array(batch_images)
-        
-        yield shuffle(batch_images, batch_labels)
-
-train_generator = generator(X_train, y_train)
+train_real, val_real, train_real_y, val_real_y = train_test_split(real_paths, real_labels, test_size=0.4, random_state=42)
 
 
-# Create the model
-from keras.models import Sequential
+# Add the respective halves to real and plain, augment them and encode the labels
+real_bg_data.add_paths(val_real)
+real_bg_data.add_labels(val_real_y)
 
+real_bg_data.extract_and_augment()
+real_bg_data.encode_labels()
+
+plain_bg_data.add_paths(train_real)
+plain_bg_data.add_labels(train_real_y)
+
+plain_bg_data.extract_and_augment()
+plain_bg_data.encode_labels()
+
+# Get the final training and validation datasets
+X_train = plain_bg_data.data()
+y_train = plain_bg_data.y()
+
+X_val = real_bg_data.data()
+y_val = real_bg_data.y()
+
+# Load the model
 from keras.models import load_model
-model = load_model('shape-128-augmented-june13.h5')
-model.compile(loss='categorical_crossentropy', optimizer="sgd", metrics=['accuracy'])
+model = load_model('shape-128-augmented-june14.h5')
 
-# Create callback functions for training, to save best models
-from keras.callbacks import ModelCheckpoint, Callback
+model.summary()
 
-save_model = keras.callbacks.ModelCheckpoint("shape-128-augmented-june13.h5", monitor='val_acc', verbose=1, save_best_only=True, save_weights_only=False, mode='auto', period=1)
+from keras.optimizers import Adam
+adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
 
-class SaveSession(Callback):
-    def on_train_begin(self, logs={}):
-        self.best = 0
-        self.saver = tf.train.Saver()
-    
-    def on_epoch_end(self, logs={}):
-        acc = logs.get('val_acc')
-        if (acc >= self.best):
-            print(model.output.op.name)
-            self.saver.save(K.get_session(), '/keras_model.ckpt')
+model.compile(loss='categorical_crossentropy', optimizer=adam, metrics=['accuracy'])
 
-save_session = SaveSession()
 
+# Create callback function for training, to save best models
+from keras.callbacks import ModelCheckpoint, CSVLogger
+
+save_model = ModelCheckpoint("shape-128-augmented-june14.h5", monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='auto', period=1)
+csv_logger = CSVLogger('training.log')
 
 # Train!
-model.fit_generator(generator=train_generator, steps_per_epoch=len(X_train), epochs=1, verbose=100, validation_data=(x_val, y_val), shuffle=True, callbacks=[save_model, save_session])
+model.fit(X_train, y_train, epochs=1000, verbose=1, batch_size=64, validation_data=(X_val, y_val), shuffle=True, callbacks=[save_model, csv_logger], initial_epoch=1)

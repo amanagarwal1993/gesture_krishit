@@ -7,26 +7,24 @@ import requests
 import operator
 
 from keras.models import load_model
-model = load_model('shape-128-grayscale-june11-withflip.h5')
+model = load_model('shape-128-augmented-june13-final.h5')
 
 gestures = {0: 'Closed fist', 
-            1: 'Four fingers', 
-            2: 'C shape', 
+            1: 'Open palm', 
+            2: 'Pincer',
             3: 'Number One', 
-            4: 'One finger pointing', 
-            5: 'Pee', 
-            6: 'Two beers', 
-            7: 'Spidey'}
+            4: 'Finger pointing sideways', 
+            5: 'Number Two', 
+            6: 'Spidey'}
+
+#[0:'a', 1:'b', 2:'c', 3:'d', 4:'g', 4:'h', 3:'l', 5:'v', 6:'y']
 
 
 def classify(img):
     image = np.array([img * 1./255 - 0.5])
     out = model.predict(image)
     gesture = gestures[np.argmax(out)]
-    if np.max(out) > 0.40:
-        return gesture
-    else:
-        return "Not clear"
+    return gesture
 
 # parameters
 threshold = 60  #  BINARY threshold
@@ -62,21 +60,21 @@ while camera.isOpened():
     frame = cv2.flip(frame, 1)  # flip the frame horizontally
 
     # Draw the region of interest onto original frame for visual feedback
-    cv2.rectangle(frame, ((frame.shape[1]-400), 0),
-                 (frame.shape[1], 400), (255, 0, 0), 2)
+    cv2.rectangle(frame, ((frame.shape[1]-500), 0),
+                 (frame.shape[1], 500), (255, 0, 0), 2)
     #  Main operation
     # this part will run when you press 'b' on a frame
     # Process Image
     #img = removeBG(frame)
 
     # extract the ROI
-    roi = frame[0:400, (frame.shape[1]-400):frame.shape[1]]
+    roi = frame[0:500, (frame.shape[1]-500):frame.shape[1]]
     #roi = removeBG(roi)
     roi = cv2.resize(roi, (128,128), interpolation = cv2.INTER_AREA)
     
     # convert the image into binary image
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    gray = cv2.flip(gray, 1)
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) * 1./255 - 0.5
+    #gray = cv2.flip(gray, 1)
     #gesture = classify(gray)
 
     thresh = np.dstack((gray, gray, gray))
@@ -88,7 +86,6 @@ while camera.isOpened():
     cv2.putText(frame, classify(gray), (10,500), font, 4,(0,0,255),4,cv2.LINE_AA)
     
     cv2.imshow('original', frame)
-
 
     k = cv2.waitKey(10)
     if k == 27:  # press ESC to exit
